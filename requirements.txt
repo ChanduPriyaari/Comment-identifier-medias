@@ -1,6 +1,8 @@
 streamlit
 pandas
-numpy
+matplotlib
+google-api-python-client
+python-dotenv
 scikit-learn
 joblib
-nltk
+langdetect

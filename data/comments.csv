@@ -1,8 +1,10 @@
-comment,insult,threat,hate,harassment,love,support
-You are disgusting and dumb,1,0,1,0,0,0
-I really love your hard work,0,0,0,0,1,1
-Thank you for helping me,0,0,0,0,0,1
-I will destroy you,0,1,0,0,0,0
-This is very bad and hateful,1,0,1,1,0,0
-You are amazing and supportive,0,0,0,0,1,1
-Stop bothering me again,1,0,0,1,0,0
+comment,insult,hate,threat,harassment,love,support
+fuck you,1,0,0,1,0,0
+i will hurt you,0,0,1,0,0,0
+you are dumb,1,0,0,0,0,0
+i hate you,0,1,0,0,0,0
+stop harassing me,0,0,0,1,0,0
+this is amazing work,0,0,0,0,1,1
+great explanation,0,0,0,0,1,1
+thank you so much,0,0,0,0,1,1
+xyz jkl qwe,0,0,0,0,0,0

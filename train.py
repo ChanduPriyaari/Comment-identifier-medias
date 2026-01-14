@@ -1,59 +1,43 @@
+import pandas as pd
 import joblib
-from sklearn.model_selection import train_test_split
-from sklearn.multiclass import OneVsRestClassifier
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.multioutput import MultiOutputClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import classification_report
-
-from data_loader import load_dataset
 from preprocess import clean_text
-from features import build_vectorizer
 
-LABEL_COLUMNS = [
-    "insult",
-    "threat",
-    "hate",
-    "harassment",
-    "love",
-    "support"
-]
+# Load dataset
+df = pd.read_csv("data/comments.csv")
 
-def train_model(csv_path: str):
-    # Load data
-    df = load_dataset(csv_path)
+# Clean text
+df["comment"] = df["comment"].astype(str)
+df["cleaned"] = df["comment"].apply(clean_text)
 
-    # Clean text
-    df["clean_comment"] = df["comment"].apply(clean_text)
+# Labels (force numeric)
+label_cols = ["insult", "hate", "threat", "harassment", "love", "support"]
+df[label_cols] = df[label_cols].apply(pd.to_numeric, errors="coerce").fillna(0).astype(int)
 
-    X = df["clean_comment"]
-    y = df[LABEL_COLUMNS]
+X = df["cleaned"]
+y = df[label_cols]
 
-    # Train-test split
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
-    )
+# Vectorization
+vectorizer = TfidfVectorizer(
+    ngram_range=(1, 2),
+    min_df=1,
+    max_df=0.9
+)
 
-    # Vectorization
-    vectorizer = build_vectorizer()
-    X_train_vec = vectorizer.fit_transform(X_train)
-    X_test_vec = vectorizer.transform(X_test)
+X_vec = vectorizer.fit_transform(X)
 
-    # Model
-    model = OneVsRestClassifier(
-        LogisticRegression(
-            max_iter=1000,
-            solver="liblinear"
-        )
-    )
+# Model
+model = MultiOutputClassifier(
+    LogisticRegression(max_iter=1000)
+)
 
-    model.fit(X_train_vec, y_train)
+# Train
+model.fit(X_vec, y)
 
-    # Evaluation
-    y_pred = model.predict(X_test_vec)
-    print(classification_report(y_test, y_pred, target_names=LABEL_COLUMNS))
+# Save
+joblib.dump(model, "model/toxic_model.pkl")
+joblib.dump(vectorizer, "model/vectorizer.pkl")
 
-    # Save artifacts
-    joblib.dump(model, "model/toxic_model.pkl")
-    joblib.dump(vectorizer, "model/vectorizer.pkl")
-
-if __name__ == "__main__":
-    train_model("data/comments.csv")
+print("Model trained successfully")

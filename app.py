@@ -1,138 +1,178 @@
 import streamlit as st
 import pandas as pd
+import matplotlib.pyplot as plt
+import os
+from googleapiclient.discovery import build
+from dotenv import load_dotenv
 from predict import predict_labels
 
-# --------------------------------------------------
-# PAGE CONFIG
-# --------------------------------------------------
+# ---------------- PAGE CONFIG ----------------
 st.set_page_config(
-    page_title="AI Comment Analytics & Moderation System",
-    layout="wide"
+    page_title="AI YouTube Comment Moderation & Insights",
+    page_icon="🛡️",
+    layout="wide",
+    initial_sidebar_state="collapsed"
 )
 
-# --------------------------------------------------
-# HEADER
-# --------------------------------------------------
+# ---------------- HIDE SIDEBAR COMPLETELY ----------------
 st.markdown("""
-## AI Comment Analytics & Moderation System
+<style>
+[data-testid="stSidebar"] {display: none !important;}
+[data-testid="collapsedControl"] {display: none !important;}
+</style>
+""", unsafe_allow_html=True)
 
-This application analyzes **user-generated comments** using Machine Learning
-to identify **toxic behavior** (insult, hate, threat, harassment) and
-**positive intent** (love, support).
+# ---------------- LOAD ENV ----------------
+# IMPORTANT: supports .env inside assets/ OR root
+load_dotenv()
+load_dotenv("assets/.env")
 
-The goal is to **support content moderation decisions** through analytics,
-not just individual predictions.
-""")
+API_KEY = os.getenv("YOUTUBE_API_KEY")
 
+# ---------------- MATPLOTLIB DARK MODE ----------------
+plt.style.use("dark_background")
+
+# ---------------- UTILS ----------------
+def extract_video_id(url):
+    if not url:
+        return None
+    if "v=" in url:
+        return url.split("v=")[1].split("&")[0]
+    if "youtu.be/" in url:
+        return url.split("youtu.be/")[1].split("?")[0]
+    return None
+
+def get_video_stats(youtube, video_id):
+    req = youtube.videos().list(
+        part="snippet,statistics",
+        id=video_id
+    )
+    res = req.execute()
+    item = res["items"][0]
+    stats = item["statistics"]
+    snippet = item["snippet"]
+    return {
+        "title": snippet["title"],
+        "views": int(stats.get("viewCount", 0)),
+        "likes": int(stats.get("likeCount", 0)),
+        "comments": int(stats.get("commentCount", 0))
+    }
+
+def fetch_all_comments(youtube, video_id):
+    comments = []
+    token = None
+
+    while True:
+        req = youtube.commentThreads().list(
+            part="snippet",
+            videoId=video_id,
+            maxResults=100,
+            pageToken=token,
+            textFormat="plainText"
+        )
+        res = req.execute()
+
+        for item in res.get("items", []):
+            text = item["snippet"]["topLevelComment"]["snippet"]["textDisplay"]
+            comments.append(text)
+
+        token = res.get("nextPageToken")
+        if not token:
+            break
+
+    return comments
+
+# ---------------- UI ----------------
+st.markdown("## 🛡️ AI YouTube Comment Moderation & Insights")
+st.caption("Real-time analysis of YouTube video engagement and comment toxicity")
 st.divider()
 
-# --------------------------------------------------
-# INPUT SECTION
-# --------------------------------------------------
-st.markdown("### Comment Input")
-
-input_type = st.radio(
-"How would you like to analyze comments?",
-["Analyze one comment", "Analyze multiple comments"],  
+video_url = st.text_input(
+    "🔗 Paste YouTube Video Link",
+    placeholder="https://www.youtube.com/watch?v=XXXX"
 )
 
-comments = []
+if st.button("🚀 Analyze Video", use_container_width=True):
 
-if input_type == "Single Comment":
-    single_comment = st.text_area(
-        "Enter a comment for analysis:",
-        height=120,
-        placeholder="Example: This comment is abusive and offensive"
+    if not API_KEY:
+        st.error("YouTube API key not found. Please add YOUTUBE_API_KEY in .env file.")
+        st.stop()
+
+    video_id = extract_video_id(video_url)
+    if not video_id:
+        st.error("Invalid YouTube video link.")
+        st.stop()
+
+    youtube = build("youtube", "v3", developerKey=API_KEY)
+
+    # -------- VIDEO STATS --------
+    stats = get_video_stats(youtube, video_id)
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("👁 Views", f"{stats['views']:,}")
+    c2.metric("👍 Likes", f"{stats['likes']:,}")
+    c3.metric("💬 Total Comments", f"{stats['comments']:,}")
+
+    st.subheader("📌 Video Title")
+    st.write(stats["title"])
+
+    st.divider()
+
+    # -------- COMMENTS --------
+    with st.spinner("Fetching and analyzing ALL comments (this may take time)..."):
+        comments = fetch_all_comments(youtube, video_id)
+
+    results = []
+    for c in comments:
+        labels = predict_labels(c)
+        label = labels[0] if labels else "Safe"
+        results.append({"Comment": c, "Label": label})
+
+    df = pd.DataFrame(results)
+
+    toxic = df["Label"].isin(["Toxic", "Negative"]).sum()
+    safe = (df["Label"] == "Safe").sum()
+    invalid = (df["Label"] == "Invalid").sum()
+    total = len(df)
+
+    # -------- METRICS --------
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Total Analyzed", total)
+    m2.metric("Toxic / Negative", toxic)
+    m3.metric("Safe", safe)
+    m4.metric("Invalid", invalid)
+
+    st.divider()
+
+    # -------- GRAPH --------
+    st.subheader("📊 Comment Safety Distribution")
+
+    chart_df = pd.DataFrame({
+        "Category": ["Toxic / Negative", "Safe", "Invalid"],
+        "Count": [toxic, safe, invalid]
+    })
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ax.bar(
+        chart_df["Category"],
+        chart_df["Count"],
+        color=["#ef4444", "#22c55e", "#9ca3af"]
     )
-    if single_comment.strip():
-        comments.append(single_comment)
+    ax.set_ylabel("Number of Comments")
+    ax.set_title("Comment Moderation Summary")
 
-else:
-    batch_text = st.text_area(
-        "Enter multiple comments (one per line):",
-        height=220,
-        placeholder=(
-            "Thanks for the explanation\n"
-            "I will harm you"
-        )
-    )
-    comments = [c.strip() for c in batch_text.split("\n") if c.strip()]
+    st.pyplot(fig)
 
-st.divider()
+    st.divider()
 
-# --------------------------------------------------
-# ANALYSIS
-# --------------------------------------------------
-if st.button("Run Analysis", use_container_width=True):
+    # -------- TABLE --------
+    emoji = {
+        "Toxic": "🔴 Toxic",
+        "Negative": "🟠 Negative",
+        "Safe": "🟢 Safe",
+        "Invalid": "⚪ Invalid"
+    }
+    df["Status"] = df["Label"].map(emoji)
 
-    if not comments:
-        st.warning("Please provide at least one comment.")
-    else:
-        analysis_results = []
-        label_distribution = {}
-
-        for comment in comments:
-            labels = predict_labels(comment)
-
-            analysis_results.append({
-                "Comment": comment,
-                "Classification Result": (
-                    ", ".join(labels.keys()) if labels else "Safe / Neutral"
-                )
-            })
-
-            for label in labels:
-                label_distribution[label] = label_distribution.get(label, 0) + 1
-
-        df_results = pd.DataFrame(analysis_results)
-
-        # --------------------------------------------------
-        # SUMMARY METRICS
-        # --------------------------------------------------
-        st.markdown("### Analysis Summary")
-
-        total = len(comments)
-        toxic = sum(
-            1 for r in analysis_results
-            if r["Classification Result"] != "Safe / Neutral"
-        )
-        safe = total - toxic
-
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Total Comments", total)
-        c2.metric("Toxic Comments", toxic)
-        c3.metric("Safe / Neutral", safe)
-
-        st.divider()
-
-        # --------------------------------------------------
-        # TOXICITY DISTRIBUTION
-        # --------------------------------------------------
-        if label_distribution:
-            st.markdown("### Toxicity Distribution by Category")
-
-            df_labels = pd.DataFrame.from_dict(
-                label_distribution,
-                orient="index",
-                columns=["Occurrences"]
-            )
-
-            st.bar_chart(df_labels)
-
-        else:
-            st.info("No toxic categories detected in the analyzed comments.")
-
-        st.divider()
-
-        # --------------------------------------------------
-        # DETAILED RESULTS
-        # --------------------------------------------------
-        st.markdown("### Detailed Comment Analysis")
-
-        st.dataframe(
-            df_results,
-            use_container_width=True,
-            hide_index=True
-        )
-
-    
+    st.subheader("📋 All Comments Analysis")
+    st.dataframe(df[["Comment", "Status"]], use_container_width=True)
